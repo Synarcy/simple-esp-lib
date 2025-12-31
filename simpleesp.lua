@@ -1,172 +1,183 @@
-local esp = {};
-esp.enabled = false;
-esp.settings = {
-    box = true,
-    name = true,
-    dist = true,
-    hp = true,
-    tracer = true,
-    boxColor = Color3.new(1, 0, 0),
-    nameColor = Color3.new(1, 1, 1),
-    distColor = Color3.new(0.8, 0.8, 0.8),
-    tracerColor = Color3.new(1, 0, 0),
-    textSize = 13
-};
+local esplib = {};
+esplib.enabled = false;
+esplib.objs = {};
 
 local cam = workspace.CurrentCamera;
 local rs = game:GetService("RunService");
 local lp = game:GetService("Players").LocalPlayer;
-local vps = cam.ViewportSize;
-local esps = {};
-local conn;
+local chars = workspace:FindFirstChild("Characters");
 
-local function getBox(char)
-    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge;
-    local onScr = false;
-    for _, p in next, char:GetDescendants() do
-        if p:IsA("BasePart") then
-            for x = -1, 1, 2 do
-                for y = -1, 1, 2 do
-                    for z = -1, 1, 2 do
-                        local corner = (p.CFrame * CFrame.new(p.Size.X/2*x, p.Size.Y/2*y, p.Size.Z/2*z)).Position;
-                        local pos, vis = cam:WorldToViewportPoint(corner);
-                        if vis then
-                            onScr = true;
-                            minX, minY = math.min(minX, pos.X), math.min(minY, pos.Y);
-                            maxX, maxY = math.max(maxX, pos.X), math.max(maxY, pos.Y);
-                        end
-                    end
-                end
-            end
-        end
-    end
-    if onScr then return Vector2.new(minX, minY), Vector2.new(maxX - minX, maxY - minY) end;
-end
-
-local function createEsp()
+local function create()
     local t = {};
     t.box = Drawing.new("Square");
     t.box.Thickness = 1;
     t.box.Filled = false;
+    t.box.Color = Color3.new(1, 0.08, 0.08);
     
     t.name = Drawing.new("Text");
-    t.name.Size = esp.settings.textSize;
+    t.name.Size = 13;
     t.name.Center = true;
     t.name.Outline = true;
+    t.name.Color = Color3.new(1, 1, 1);
+    
+    t.hp = Drawing.new("Text");
+    t.hp.Size = 12;
+    t.hp.Center = true;
+    t.hp.Outline = true;
     
     t.dist = Drawing.new("Text");
-    t.dist.Size = esp.settings.textSize - 1;
+    t.dist.Size = 12;
     t.dist.Center = true;
     t.dist.Outline = true;
+    t.dist.Color = Color3.new(1, 1, 1);
     
-    t.hpBg = Drawing.new("Square");
-    t.hpBg.Filled = true;
-    t.hpBg.Color = Color3.new(0, 0, 0);
+    t.ult = Drawing.new("Text");
+    t.ult.Size = 12;
+    t.ult.Center = true;
+    t.ult.Outline = true;
+    t.ult.Color = Color3.new(0, 0.5, 1);
     
-    t.hp = Drawing.new("Square");
-    t.hp.Filled = true;
-    
-    t.tracer = Drawing.new("Line");
-    t.tracer.Thickness = 1;
+    t.char = Drawing.new("Text");
+    t.char.Size = 12;
+    t.char.Center = true;
+    t.char.Outline = true;
+    t.char.Color = Color3.new(1, 0.5, 0);
     
     return t;
-end
+end;
 
-local function removeEsp(t)
-    for _, d in next, t do d:Remove() end;
-end
+local function hide(t)
+    for _, d in t do d.Visible = false; end;
+end;
+
+local function remove(t)
+    for _, d in t do d:Remove(); end;
+end;
+
+local function getbox(char)
+    local hrp = char:FindFirstChild("HumanoidRootPart");
+    if not hrp then return; end;
+    local pos, vis = cam:WorldToViewportPoint(hrp.Position);
+    if not vis then return; end;
+    local dist = (cam.CFrame.Position - hrp.Position).Magnitude;
+    local sz = 1800 / dist;
+    local h = sz * 2;
+    local w = sz;
+    return Vector2.new(pos.X - w/2, pos.Y - h/2), Vector2.new(w, h), pos;
+end;
+
+local conn;
+local lastupd = 0;
 
 local function update()
-    if not esp.enabled then return end;
-    vps = cam.ViewportSize;
-    local chars = {};
+    if not esplib.enabled then
+        for _, t in esplib.objs do hide(t); end;
+        return;
+    end;
     
-    for _, v in next, workspace:GetDescendants() do
-        if v:IsA("Humanoid") and v.Parent and v.Parent:FindFirstChild("HumanoidRootPart") then
-            if v.Parent ~= (lp and lp.Character) then
-                chars[v.Parent] = v;
-            end
-        end
-    end
+    local now = tick();
+    if now - lastupd < 0.05 then return; end;
+    lastupd = now;
     
-    for char, t in next, esps do
-        if not chars[char] or not char.Parent then
-            removeEsp(t);
-            esps[char] = nil;
-        end
-    end
+    local lpc = lp.Character;
+    local lphrp = lpc and lpc:FindFirstChild("HumanoidRootPart");
+    local plrs = game:GetService("Players");
     
-    local root = lp and lp.Character and lp.Character:FindFirstChild("HumanoidRootPart");
-    local s = esp.settings;
+    local active = {};
+    if chars then
+        for _, char in chars:GetChildren() do
+            if char ~= lpc then active[char] = true; end;
+        end;
+    end;
     
-    for char, hum in next, chars do
-        if not esps[char] then esps[char] = createEsp() end;
-        local t = esps[char];
-        local hrp = char:FindFirstChild("HumanoidRootPart");
-        local pos, size = getBox(char);
+    for char, t in esplib.objs do
+        if not active[char] then
+            remove(t);
+            esplib.objs[char] = nil;
+        end;
+    end;
+    
+    for char in active do
+        if not esplib.objs[char] then
+            esplib.objs[char] = create();
+        end;
         
-        if pos and hrp then
-            t.box.Visible = s.box;
+        local t = esplib.objs[char];
+        local hum = char:FindFirstChild("Humanoid");
+        local pos, sz, spos = getbox(char);
+        
+        if not pos or not hum then
+            hide(t);
+            continue;
+        end;
+        
+        local boxen = Toggles.BoxESP and Toggles.BoxESP.Value;
+        local nameen = Toggles.NameESP and Toggles.NameESP.Value;
+        local hpen = Toggles.HealthESP and Toggles.HealthESP.Value;
+        local disten = Toggles.DistESP and Toggles.DistESP.Value;
+        local ulten = Toggles.UltESP and Toggles.UltESP.Value;
+        local charen = Toggles.CharESP and Toggles.CharESP.Value;
+        
+        t.box.Visible = boxen;
+        if boxen then
             t.box.Position = pos;
-            t.box.Size = size;
-            t.box.Color = s.boxColor;
-            
-            t.name.Visible = s.name;
+            t.box.Size = sz;
+        end;
+        
+        local yoff = pos.Y - 16;
+        
+        t.name.Visible = nameen;
+        if nameen then
             t.name.Text = char.Name;
-            t.name.Position = Vector2.new(pos.X + size.X/2, pos.Y - 16);
-            t.name.Color = s.nameColor;
-            
-            local dst = root and math.floor((root.Position - hrp.Position).Magnitude) or 0;
-            t.dist.Visible = s.dist;
-            t.dist.Text = "["..dst.."m]";
-            t.dist.Position = Vector2.new(pos.X + size.X/2, pos.Y + size.Y + 2);
-            t.dist.Color = s.distColor;
-            
-            local hpPct = math.clamp(hum.Health / hum.MaxHealth, 0, 1);
-            local hpH = size.Y * hpPct;
-            t.hpBg.Visible = s.hp;
-            t.hpBg.Position = Vector2.new(pos.X - 5, pos.Y);
-            t.hpBg.Size = Vector2.new(3, size.Y);
-            t.hp.Visible = s.hp;
-            t.hp.Position = Vector2.new(pos.X - 5, pos.Y + size.Y - hpH);
-            t.hp.Size = Vector2.new(3, hpH);
-            t.hp.Color = Color3.new(1 - hpPct, hpPct, 0);
-            
-            t.tracer.Visible = s.tracer;
-            t.tracer.From = Vector2.new(vps.X/2, vps.Y);
-            t.tracer.To = Vector2.new(pos.X + size.X/2, pos.Y + size.Y);
-            t.tracer.Color = s.tracerColor;
-        else
-            for _, d in next, t do d.Visible = false end;
-        end
-    end
-end
+            t.name.Position = Vector2.new(pos.X + sz.X/2, yoff);
+            yoff = yoff - 14;
+        end;
+        
+        t.hp.Visible = hpen;
+        if hpen then
+            local pct = hum.Health / hum.MaxHealth;
+            t.hp.Text = math.floor(hum.Health) .. "/" .. math.floor(hum.MaxHealth);
+            t.hp.Color = Color3.new(1 - pct, pct, 0);
+            t.hp.Position = Vector2.new(pos.X + sz.X/2, pos.Y + sz.Y + 2);
+        end;
+        
+        t.dist.Visible = disten;
+        if disten and lphrp then
+            local hrp = char:FindFirstChild("HumanoidRootPart");
+            if hrp then
+                t.dist.Text = math.floor((lphrp.Position - hrp.Position).Magnitude) .. "m";
+                t.dist.Position = Vector2.new(pos.X + sz.X/2, pos.Y + sz.Y + (hpen and 16 or 2));
+            end;
+        end;
+        
+        t.ult.Visible = ulten;
+        if ulten then
+            local plr = plrs:FindFirstChild(char.Name);
+            local ultval = plr and plr:GetAttribute("Ultimate") or 0;
+            t.ult.Text = "Ult: " .. math.floor(ultval) .. "%";
+            t.ult.Position = Vector2.new(pos.X + sz.X/2, yoff);
+            yoff = yoff - 14;
+        end;
+        
+        t.char.Visible = charen;
+        if charen then
+            t.char.Text = char:GetAttribute("Moveset") or "?";
+            t.char.Position = Vector2.new(pos.X + sz.X/2, yoff);
+        end;
+    end;
+end;
 
-function esp:start()
-    if conn then return end;
+function esplib:start()
+    if conn then return; end;
     self.enabled = true;
-    conn = rs.RenderStepped:Connect(update);
-end
+    conn = rs.Heartbeat:Connect(update);
+end;
 
-function esp:stop()
+function esplib:stop()
     self.enabled = false;
-    if conn then conn:Disconnect(); conn = nil end;
-    for _, t in next, esps do removeEsp(t) end;
-    esps = {};
-end
+    if conn then conn:Disconnect(); conn = nil; end;
+    for _, t in self.objs do remove(t); end;
+    self.objs = {};
+end;
 
-function esp:toggle()
-    if self.enabled then self:stop() else self:start() end;
-end
-
-function esp:setColor(element, color)
-    local map = {box = "boxColor", name = "nameColor", dist = "distColor", tracer = "tracerColor"};
-    if map[element] then self.settings[map[element]] = color end;
-end
-
-function esp:setEnabled(element, state)
-    if self.settings[element] ~= nil then self.settings[element] = state end;
-end
-
-getgenv().esp = esp;
-return esp;
+getgenv().esplib = esplib;
