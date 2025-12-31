@@ -18,8 +18,11 @@ local lib = {
     moveset = {enabled = false, color = Color3.new(1, 0.5, 0), size = 12},
     tracer = {enabled = true, color = Color3.new(1, 0, 0), thickness = 1},
     lock = {enabled = false, color = Color3.new(0, 0.5, 1)},
+    cooldowns = {enabled = false, size = 11, readycolor = Color3.new(0, 1, 0), cdcolor = Color3.new(1, 0.3, 0.3)},
     locktarget = nil,
 };
+
+local maxcd = 6;
 
 local function getBox(char)
     local hrp = char:FindFirstChild("HumanoidRootPart");
@@ -85,15 +88,36 @@ local function createEsp()
     
     t.tracer = Drawing.new("Line");
     
+    t.cds = {};
+    for i = 1, maxcd do
+        local cd = Drawing.new("Text");
+        cd.Center = false;
+        cd.Outline = true;
+        cd.Visible = false;
+        t.cds[i] = cd;
+    end
+    
     return t;
 end
 
 local function setVis(t, v)
-    for _, d in next, t do d.Visible = v end;
+    for k, d in next, t do
+        if k == "cds" then
+            for _, cd in next, d do cd.Visible = v; end;
+        else
+            d.Visible = v;
+        end
+    end
 end
 
 local function removeEsp(t)
-    for _, d in next, t do d:Remove() end;
+    for k, d in next, t do
+        if k == "cds" then
+            for _, cd in next, d do cd:Remove(); end;
+        else
+            d:Remove();
+        end
+    end
 end
 
 local function trackChar(char)
@@ -110,6 +134,42 @@ local function untrackChar(char)
         removeEsp(esps[char]);
         esps[char] = nil;
     end
+end
+
+local function getCooldowns(char)
+    local cds = {};
+    local mset = char:FindFirstChild("Moveset");
+    if not mset then return cds; end;
+    
+    for _, v in next, mset:GetChildren() do
+        if v:IsA("NumberValue") then
+            local lastuse = v:GetAttribute("LastUse");
+            local cdtime = v.Value;
+            local remaining = 0;
+            local key = v:GetAttribute("Key");
+            
+            if lastuse and cdtime > 0 then
+                remaining = cdtime - (tick() - lastuse);
+                if remaining < 0 then remaining = 0; end;
+            end;
+            
+            table.insert(cds, {
+                name = v.Name,
+                remaining = remaining,
+                total = cdtime,
+                key = key,
+            });
+        end
+    end
+    
+    table.sort(cds, function(a, b)
+        if a.key and b.key then return a.key < b.key; end;
+        if a.key then return true; end;
+        if b.key then return false; end;
+        return a.name < b.name;
+    end);
+    
+    return cds;
 end
 
 local function update()
@@ -218,6 +278,40 @@ local function update()
         t.tracer.To = Vector2.new(pos.X + size.X/2, pos.Y + size.Y);
         t.tracer.Color = islocked and lib.lock.color or lib.tracer.color;
         t.tracer.Thickness = lib.tracer.thickness;
+        
+        if lib.cooldowns.enabled then
+            local cds = getCooldowns(char);
+            local cdX = pos.X + size.X + 5;
+            local cdY = pos.Y;
+            
+            for i = 1, maxcd do
+                local cdDraw = t.cds[i];
+                local cdData = cds[i];
+                
+                if cdData then
+                    cdDraw.Visible = true;
+                    cdDraw.Size = lib.cooldowns.size;
+                    cdDraw.Position = Vector2.new(cdX, cdY);
+                    
+                    local keystr = cdData.key and ("[" .. cdData.key .. "] ") or "";
+                    if cdData.remaining > 0 then
+                        cdDraw.Text = keystr .. cdData.name .. ": " .. string.format("%.1f", cdData.remaining) .. "s";
+                        cdDraw.Color = lib.cooldowns.cdcolor;
+                    else
+                        cdDraw.Text = keystr .. cdData.name .. ": Ready";
+                        cdDraw.Color = lib.cooldowns.readycolor;
+                    end
+                    
+                    cdY = cdY + 12;
+                else
+                    cdDraw.Visible = false;
+                end
+            end
+        else
+            for i = 1, maxcd do
+                t.cds[i].Visible = false;
+            end
+        end
     end
 end
 
