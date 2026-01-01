@@ -7,6 +7,9 @@ local charFolder = workspace:WaitForChild("Characters");
 local esps = {};
 local tracked = {};
 local conn;
+local cdcache = {};
+local cdcachetime = {};
+local cdcacheinterval = 0.1;
 
 local lib = {
     enabled = true,
@@ -27,31 +30,21 @@ local maxcd = 6;
 local function getBox(char)
     local hrp = char:FindFirstChild("HumanoidRootPart");
     if not hrp then return end;
+    local head = char:FindFirstChild("Head");
     
-    local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge;
-    local onScr = false;
+    local top = head and head.Position + Vector3.new(0, 0.5, 0) or hrp.Position + Vector3.new(0, 2.5, 0);
+    local bot = hrp.Position - Vector3.new(0, 3, 0);
     
-    for _, p in next, char:GetChildren() do
-        if not p:IsA("BasePart") then continue end;
-        local cf, sz = p.CFrame, p.Size;
-        local hx, hy, hz = sz.X/2, sz.Y/2, sz.Z/2;
-        for x = -1, 1, 2 do
-            for y = -1, 1, 2 do
-                for z = -1, 1, 2 do
-                    local pos, vis = cam:WorldToViewportPoint((cf * CFrame.new(hx*x, hy*y, hz*z)).Position);
-                    if vis then
-                        onScr = true;
-                        if pos.X < minX then minX = pos.X end;
-                        if pos.Y < minY then minY = pos.Y end;
-                        if pos.X > maxX then maxX = pos.X end;
-                        if pos.Y > maxY then maxY = pos.Y end;
-                    end
-                end
-            end
-        end
-    end
+    local tpos, tvis = cam:WorldToViewportPoint(top);
+    local bpos, bvis = cam:WorldToViewportPoint(bot);
     
-    if onScr then return Vector2.new(minX, minY), Vector2.new(maxX - minX, maxY - minY) end;
+    if not tvis and not bvis then return end;
+    
+    local h = math.abs(bpos.Y - tpos.Y);
+    local w = h * 0.6;
+    local cx = (tpos.X + bpos.X) / 2;
+    
+    return Vector2.new(cx - w/2, tpos.Y), Vector2.new(w, h);
 end
 
 local function createEsp()
@@ -130,18 +123,38 @@ end
 
 local function untrackChar(char)
     tracked[char] = nil;
+    cdcache[char] = nil;
+    cdcachetime[char] = nil;
     if esps[char] then
         removeEsp(esps[char]);
         esps[char] = nil;
-    end
+    end;
 end
 
 local function getCooldowns(char)
-    local cds = {};
-    local mset = char:FindFirstChild("Moveset");
-    if not mset then return cds; end;
+    local now = tick();
+    local cached = cdcache[char];
+    local lasttime = cdcachetime[char] or 0;
     
-    for _, v in next, mset:GetChildren() do
+    if cached and (now - lasttime) < cdcacheinterval then
+        for _, cd in cached do
+            if cd.lastuse and cd.total > 0 then
+                cd.remaining = cd.total - (now - cd.lastuse);
+                if cd.remaining < 0 then cd.remaining = 0; end;
+            end;
+        end;
+        return cached;
+    end;
+    
+    local mset = char:FindFirstChild("Moveset");
+    if not mset then 
+        cdcache[char] = {};
+        cdcachetime[char] = now;
+        return {}; 
+    end;
+    
+    local cds = {};
+    for _, v in mset:GetChildren() do
         if v:IsA("NumberValue") then
             local lastuse = v:GetAttribute("LastUse");
             local cdtime = v.Value;
@@ -149,18 +162,19 @@ local function getCooldowns(char)
             local key = v:GetAttribute("Key");
             
             if lastuse and cdtime > 0 then
-                remaining = cdtime - (tick() - lastuse);
+                remaining = cdtime - (now - lastuse);
                 if remaining < 0 then remaining = 0; end;
             end;
             
-            table.insert(cds, {
+            cds[#cds + 1] = {
                 name = v.Name,
                 remaining = remaining,
                 total = cdtime,
                 key = key,
-            });
-        end
-    end
+                lastuse = lastuse,
+            };
+        end;
+    end;
     
     table.sort(cds, function(a, b)
         if a.key and b.key then return a.key < b.key; end;
@@ -169,6 +183,8 @@ local function getCooldowns(char)
         return a.name < b.name;
     end);
     
+    cdcache[char] = cds;
+    cdcachetime[char] = now;
     return cds;
 end
 
@@ -337,6 +353,8 @@ function lib:stop()
     for _, t in next, esps do removeEsp(t) end;
     esps = {};
     tracked = {};
+    cdcache = {};
+    cdcachetime = {};
 end
 
 function lib:refresh()
